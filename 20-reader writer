@@ -1,0 +1,83 @@
+#include <stdio.h>
+#include <pthread.h>
+#include <semaphore.h>
+#include <unistd.h>
+#include <signal.h>
+
+
+int sharedData = 0;
+sem_t mutex;       
+sem_t writeMutex;  
+#define NUM_READERS 3
+#define NUM_WRITERS 2
+volatile int stopThreads = 0;
+void *reader(void *arg);
+void *writer(void *arg);
+void signalHandler(int signo) {
+    if (signo == SIGINT) {
+        stopThreads = 1;
+    }
+}
+
+int main() {
+    sem_init(&mutex, 0, 1);
+    sem_init(&writeMutex, 0, 1);
+    signal(SIGINT, signalHandler);
+    pthread_t readerThreads[NUM_READERS];
+    pthread_t writerThreads[NUM_WRITERS];
+    for (int i = 0; i < NUM_READERS; i++) {
+        pthread_create(&readerThreads[i], NULL, reader, NULL);
+    }
+    for (int i = 0; i < NUM_WRITERS; i++) {
+        pthread_create(&writerThreads[i], NULL, writer, NULL);
+    }
+    while (!stopThreads) {
+        usleep(100000); 
+    }
+    for (int i = 0; i < NUM_READERS; i++) {
+        pthread_cancel(readerThreads[i]);
+    }
+
+    for (int i = 0; i < NUM_WRITERS; i++) {
+        pthread_cancel(writerThreads[i]);
+    }
+    for (int i = 0; i < NUM_READERS; i++) {
+        pthread_join(readerThreads[i], NULL);
+    }
+
+    for (int i = 0; i < NUM_WRITERS; i++) {
+        pthread_join(writerThreads[i], NULL);
+    }
+    sem_destroy(&mutex);
+    sem_destroy(&writeMutex);
+
+    return 0;
+}
+
+void *reader(void *arg) {
+    while (!stopThreads) {
+        sem_wait(&mutex);  
+        sharedData++;      
+        printf("Reader %ld read: %d\n", pthread_self(), sharedData);
+        sem_post(&mutex); 
+        usleep(1000);
+    }
+
+    pthread_exit(NULL);
+}
+
+void *writer(void *arg) {
+    while (!stopThreads) {
+        sem_wait(&writeMutex);  
+        sem_wait(&mutex);       
+
+        sharedData++;           
+        printf("Writer %ld wrote: %d\n", pthread_self(), sharedData);
+
+        sem_post(&mutex);       
+        sem_post(&writeMutex);  
+        usleep(2000);
+    }
+
+    pthread_exit(NULL);
+}
